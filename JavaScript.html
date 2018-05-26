@@ -1,0 +1,865 @@
+<script>
+/*jslint
+browser, maxlen: 80, single, white
+*/
+/*global
+$, google, RESTAURANT_ARRAY, Sortable, USER_OBJ, window
+*/
+/*property
+append, attr, cleanup, click, currency, currentTarget,
+deleteOrderFromSpreadsheet, deleteRestrFromSpreadsheet, empty, familyName,
+fileOrderEditToSpreadsheet, fileOrderToSpreadsheet, fileRestrToSpreadsheet,
+find, forEach, from, getOneOrder, getOrders, getRestrArr, givenName, html,
+id, indexOf, init, length, name, order, orders, parse, pickup,
+preventDefault, price, push, ready, restr, reverse, rowNum, run,
+runningTotal, sSindex, script, selectedIndex, selection, sort, status,
+stringify, style, submit, tax, toFixed, toLocaleString, total, users,
+withSuccessHandler
+*/
+
+
+/*
+* set up globals
+*/
+var RESTAURANT_ARRAY;
+var TIMER_INT_ID;
+
+function getRestrArr(restrArr) {
+  'use strict';
+  RESTAURANT_ARRAY = restrArr;
+}
+google.script.run.withSuccessHandler(getRestrArr).getRestrArr();
+
+//****************************** View Orders *********************************/
+
+
+/**
+* @param {Object} orders
+* @return {string}
+*/
+function getOrderRows(orders) {
+  'use strict';
+  var rows = '';
+  var total = 0;
+  var totalTax = 0;
+  var grandTotal = 0;
+  var grandTotalAlt = 0;
+  orders.forEach(function(order, index) {
+    rows += '<tr>';
+    rows += '<td class="numCol">' + (index + 1) + '</td>';
+    rows += '<td>' + order[0] + '</td>';
+    rows += '<td>' + order[1] + '</td>';
+    rows += '<td class="dollarsDetail">';
+    rows += order[2].toLocaleString('en-US',
+        { style: 'currency', currency: 'USD' });
+    rows += '</td>';
+    rows += '<td class="dollarsDetail">';
+    rows += order[3].toLocaleString('en-US',
+        { style: 'currency', currency: 'USD' });
+    rows += '</td>';
+    rows += '<td class="dollarsDetail">';
+    rows += order[4].toLocaleString('en-US',
+        { style: 'currency', currency: 'USD' });
+    rows += '</td>';
+    if (order[5] === 'on') {
+      rows += '<td class="pickup volCol">Yes</td>';
+    } else {
+      rows += '<td class="volCol">No</td>';
+    }
+    if (order[6] === 'on') {
+      rows += '<td class="cleanup volCol">Yes</td>';
+    } else {
+      rows += '<td class="volCol">No</td>';
+    }
+    rows += '</tr>';
+    total += order[2];
+    totalTax += order[3];
+    grandTotal += order[4];
+  });
+  grandTotalAlt = total + (total * 0.07);
+  return [
+    rows,
+    total.toLocaleString('en-US',
+        { style: 'currency', currency: 'USD' }),
+    totalTax.toLocaleString('en-US',
+        { style: 'currency', currency: 'USD' }),
+    grandTotal.toLocaleString('en-US',
+        { style: 'currency', currency: 'USD' }),
+    grandTotalAlt.toLocaleString('en-US',
+          { style: 'currency', currency: 'USD' })
+  ];
+}
+
+
+/**
+* @param {object} users
+* @return {string}
+*/
+function getRunningTotal(users) {
+  'use strict';
+  var usersArr = Array.from(users);
+  var userArr = usersArr.find(
+      function(current) {
+        if (current[0] === USER_OBJ.id) {
+          return true;
+        }
+      }
+      );
+  if (userArr) {
+    return userArr[1] || 0;
+  } else {
+    return 0;
+  }
+
+}
+
+
+/**
+* @param {string} ordersStr
+* @return {Object}
+*/
+function ordersStr2Json(ordersStr) {
+  'use strict';
+  var ordersJson = JSON.parse(ordersStr);
+  var ordersArr = ordersJson.orders;
+  var ordersObj = {};
+  var tempObj = {};
+  if (ordersJson.users) {
+    ordersObj.runningTotal = getRunningTotal(ordersJson.users);
+  }
+  ordersObj.orders = [];
+  ordersArr.forEach(function(currVal, index) {
+    if (index > 0) {
+      // order active
+      if (currVal[8] === 'Active') {
+        tempObj = {
+          'id': currVal[1],
+          'restr': currVal[2],
+          'sSindex': index,
+          'name': currVal[3],
+          'selection': currVal[4],
+          'price': currVal[5],
+          'pickup': currVal[6],
+          'cleanup': currVal[7],
+          'status': currVal[8],
+          'rowNum': currVal[9]
+        };
+        ordersObj.orders.push(tempObj);
+      }
+    }
+  });
+  return ordersObj;
+}
+
+function completeOrder() {
+  'use strict';
+  // tbd
+  return;
+}
+
+
+/**
+* @param {string} ordersJsonStr
+*/
+function displayOrders(ordersJsonStr) {
+  'use strict';
+  var ordersJson = ordersStr2Json(ordersJsonStr);
+  var ordersArr = [];
+  var restrSeq = 0;
+  var restrArr = [];
+  $('div.container').empty();
+  $('div.container').append(
+      '<div id="takeoutHeader"></div>' +
+      '<div id="takeoutBody"></div>' +
+      '<div id="takeoutFooter"></div>');
+  $('div#takeoutHeader').html(
+      '<div id="takeoutHeader">' + '<h2>Takeout Orders</h2>' +
+      '<a onClick="getEnterOrdersPage()"><u>' +
+      'Enter, edit, or delete takeout-orders for ' +
+      USER_OBJ.name.familyName + ',' + USER_OBJ.name.givenName +
+      '</u></a>' + '</div>');
+  ordersJson.orders.reverse();
+  ordersJson.orders.forEach(function(currVal) {
+    restrSeq = restrArr.indexOf(currVal.restr);
+    if (restrSeq === -1) {
+      // push returns length of array
+      restrSeq = restrArr.push(currVal.restr) - 1;
+      ordersArr[restrSeq] = [restrSeq, currVal.restr, []];
+    }
+
+    ordersArr[restrSeq][2].push(
+        [
+         currVal.name,
+         currVal.selection,
+         currVal.price,
+         (currVal.price * 0.07),
+         currVal.price + (currVal.price * 0.07),
+         currVal.pickup,
+         currVal.cleanup
+        ]
+    );
+    ordersArr[restrSeq][2].sort();
+  });
+  ordersArr.sort();
+  // orders display by restaurant with most recent at top
+  ordersArr.forEach(function(currVal) {
+    var restrOrders = [];
+    var orderRows = '';
+    var ordersTotal = 0;
+    var ordersTax = 0;
+    var grandTotal = 0;
+    var grandTotalAlt = 0;
+    var ordersHtml = '';
+    restrOrders = getOrderRows(currVal[2]);
+    orderRows = restrOrders[0];
+    ordersTotal = restrOrders[1];
+    ordersTax = restrOrders[2];
+    grandTotal = restrOrders[3];
+    grandTotalAlt = restrOrders[4];
+    ordersHtml += '<table id="t' + currVal[0];
+    ordersHtml += '" class="table table-bordered table-striped';
+    ordersHtml += ' table-condensed hidden-print" data-sortable>';
+    ordersHtml += '<caption>';
+    // print button
+    ordersHtml += '&#32;<button class="hidden-print"';
+    ordersHtml += ' onclick="getElementById(\'t' + currVal[0] + '\')';
+    ordersHtml += '.className=\'table table-bordered table-striped';
+    ordersHtml += ' table-condensed\';window.print();';
+    ordersHtml += 'getElementById(\'t' + currVal[0] + '\')';
+    ordersHtml += '.className=\'table table-bordered table-striped';
+    ordersHtml += ' table-condensed tablesorter hidden-print\';"';
+    ordersHtml += ' value="print">Print</button>&#32;';
+    // restaurant name
+    if (currVal[1] === 'NA') {
+      ordersHtml += '<span title="Restaurant not named">';
+      ordersHtml += '*** TBD ***</span>';
+    } else {
+      ordersHtml += currVal[1];
+    }
+    ordersHtml += '</caption>';
+    ordersHtml += '<thead><tr>';
+    // header
+    ordersHtml += '<th class="numCol">No.</th>';
+    ordersHtml += '<th class="nameCol">Name</th>';
+    ordersHtml += '<th class="orderCol">Order</th>';
+    ordersHtml += '<th class="dollarsHeader" data-sortable-type="numeric">';
+    ordersHtml += 'Price</th>';
+    // 7% Sales Tax (
+    ordersHtml += '<th title="7&#37;&#32;Sales Tax&#32;&#40;';
+    // State 6.25% +
+    ordersHtml += 'State&#32;6.25&#37;&#32;&#43;';
+    // Local Option 0.75%)
+    ordersHtml += '&#32;Local Option&#32;0.75&#37;&#41;"';
+    ordersHtml += ' class="dollarsHeader" data-sortable-type="numeric">';
+    ordersHtml += 'Tax</th>';
+    ordersHtml += '<th class="dollarsHeader" data-sortable-type="numeric">';
+    ordersHtml += 'Total</th>';
+    ordersHtml += '<th class="volCol" title="Order organizer"';
+    ordersHtml += ' data-sortable="false">';
+    ordersHtml += '<span class="glyphicon glyphicon-cutlery"></span></th>';
+    ordersHtml += '<th class="volCol" title="Clean up volunteer"';
+    ordersHtml += ' data-sortable="false">';
+    ordersHtml += '<span class="glyphicon glyphicon-trash"></span></th>';
+    ordersHtml += '</tr></thead>';
+    // footer
+    ordersHtml += '<tfoot>';
+    ordersHtml += '<tr>';
+    ordersHtml += '<td colspan="3" class="grandTotals">Grand Totals:</td>';
+    ordersHtml += '<td class="dollarsDetail">' + ordersTotal + '</td>';
+    ordersHtml += '<td class="dollarsDetail">' + ordersTax + '</td>';
+    ordersHtml += '<td class="gTotalsResult"';
+    // Alt calc:
+    ordersHtml += ' title="Alt calc&#58;&#32;';
+    ordersHtml += grandTotalAlt;
+    ordersHtml += '">';
+    ordersHtml += grandTotal;
+    ordersHtml += '</td>';
+    ordersHtml += '<td colspan="2"></td></tr>';
+    ordersHtml += '</tfoot>';
+    ordersHtml += '<tbody>';
+    ordersHtml += orderRows;
+    ordersHtml += '</tbody>';
+    ordersHtml += '</table>';
+    $('div#takeoutBody').append(ordersHtml);
+    $('#t' + currVal[0]);
+  });
+  Sortable.init();
+}
+
+
+/**
+*/
+function getOrdersPage() {
+  'use strict';
+  // Client-side calls to server-side functions are asynchronous
+  google.script.run.withSuccessHandler(displayOrders).getOrders();
+}
+
+
+/**
+*
+*/
+function setIntervalTimer() {
+  'use strict';
+  TIMER_INT_ID = setInterval(
+      function() {
+        getOrdersPage();
+      }, 120000);
+}
+
+/** ********************** jQuery functions ********************************* */
+
+$(document).ready(
+    function() {
+      'use strict';
+      getOrdersPage();
+      setIntervalTimer();
+    });
+
+/** ********************** Restaurant Dictionary **************************** */
+
+
+/**
+* @return {string}
+*/
+function restrDictHdr() {
+  'use strict';
+  var html = '<h2>Restaurant Dictionary&#32;';
+  html += '<button type="button" class="btn btn-default"';
+  html += ' onclick="getEnterOrdersPage()">Exit</button>';
+  html += '</h2>';
+  //
+  html += '<h4>Add a restaurant</h4>';
+  html += '<form id="restrDictFrm" class="form-horizontal" action="">';
+  html += '<div class="form-group">';
+  html += '<label class="control-label col-sm-2" for="restrName">Name:</label>';
+  html += '<div class="col-sm-10">';
+  html += '<input type="text" class="form-control" id="restrName"';
+  html += ' name="restrName" placeholder="Enter name">';
+  html += '</div>';
+  html += '</div>';
+  html += '<div class="form-group">';
+  html += '<label class="control-label col-sm-2" for="restrUrl">';
+  html += 'Menu Link:</label>';
+  html += '<div class="col-sm-10">';
+  html += '<input type="url" class="form-control" id="restrUrl"';
+  html += ' name="restrUrl" placeholder="Enter link">';
+  html += '</div>';
+  html += '</div>';
+  html += '<div class="form-group">';
+  html += '<div class="col-sm-offset-2 col-sm-10">';
+  html += '</div>';
+  html += '</div>';
+  html += '<div class="form-group">';
+  html += '<div class="col-sm-offset-2 col-sm-10">';
+  html += '<button id="restrBtn" type="submit" class="btn btn-default">';
+  html += 'Submit</button>';
+  html += '</div>';
+  html += '</div>';
+  html += '<input type="hidden" name="userId" value="' + USER_OBJ.id + '">';
+  html += '</form>';
+  //
+  return html;
+}
+
+
+/**
+* @return {string}
+*/
+function restrDictBdy() {
+  'use strict';
+  var html = '<h4>Restaurants</h4>';
+  html += '<div class="table-responsive">';  // table-responsive
+  html += '<table class="table table-striped table-bordered table-condensed';
+  html += ' table-hover">';
+  html += '<thead>';
+  html += '<tr><th>Delete</th><th>Name</th><th>Menu Link</th></tr>';
+  html += '</thead>';
+  html += '<tbody>';
+  RESTAURANT_ARRAY.forEach(function(curr, index) {
+    html += '<tr>';
+    html += '<td class="danger">';
+    html += '<a onclick="deleteFromRestrDict(' + index + ')"';
+    html += ' title="Click to delete this entry."';
+    html += ' class="text-danger">';
+    html += '<span class="glyphicon glyphicon-remove"></span></a>';
+    html += '</td>';
+    html += '<td class="restrName">' + curr[0] + '</td>';
+    html += '<td>' + curr[1] + '</td>';
+    html += '</tr>';
+  });
+  html += '</tbody>';
+  html += '</table>';
+  html += '</div>';  // table-responsive
+  return html;
+}
+
+
+function reloadRestDictPage(restrArr) {
+  'use strict';
+  RESTAURANT_ARRAY = restrArr;
+  // re-display restaurant table
+  $('div#takeoutHeader').html(restrDictHdr());
+  $('div#takeoutBody').html(restrDictBdy());
+  $('#restrBtn').click(function() {
+    $('#restrDictFrm').submit(function(event) {
+      event.preventDefault();
+      google.script.run
+          .withSuccessHandler(reloadRestDictPage)
+          .fileRestrToSpreadsheet(event.currentTarget);
+    });
+  });
+}
+
+
+/**
+* @param {number} index
+*/
+function deleteFromRestrDict(index) {
+  'use strict';
+  google.script.run.withSuccessHandler(reloadRestDictPage)
+      .deleteRestrFromSpreadsheet(index);
+}
+
+
+/**
+* @param {object} formObj
+*/
+function handleRestrFrmSubmit(formObj) {
+  'use strict';
+  google.script.run
+      .withSuccessHandler(reloadRestDictPage)
+      .fileRestrToSpreadsheet(formObj);
+}
+
+
+/** ********************** Enter Orders ************************************* */
+
+
+/**
+*/
+function menuSelect() {
+  'use strict';
+  var menuLinks = [];
+  menuLinks[0] = 'http://www.google.com';
+  RESTAURANT_ARRAY.forEach(function(currentVal, index) {
+    menuLinks[index + 1] = currentVal[1];
+  });
+  $('#menuLink').attr(
+      'href',
+      menuLinks[$('#menuSelected')[0].selectedIndex]
+  );
+}
+
+
+/**
+* @return {string}
+*/
+function getRestArr() {
+  'use strict';
+  var restStr = '';
+  RESTAURANT_ARRAY.forEach(function(currentVal) {
+    restStr = restStr + '<option value="' + currentVal[0] + '">' +
+        currentVal[0] + '</option>';
+  });
+  return restStr;
+}
+
+
+/**
+* Edit or Delete orders
+* @param {Ojbect} ordersArr
+* @return {String}
+*/
+function edDelOrders(ordersArr) {
+  'use strict';
+  var ordersStr = '';
+  if (ordersArr.length > 0) {
+    ordersStr += '<br />';
+    ordersStr += '<table class="table table-bordered">';
+    ordersStr += '<caption>Edit/Delete Previous Order(s)</caption>';
+    ordersStr += '<tr>';
+    ordersStr += '<th class="restCol">Restaurant</th>';
+    ordersStr += '<th class="selCol">Selection</th>';
+    ordersStr += '<th class="dollarsHeader">Price</th>';
+    ordersStr += '<th title="Order organizer" class="volCol">';
+    ordersStr += '<span class="glyphicon glyphicon-cutlery"></th>';
+    ordersStr += '<th title="Clean up volunteer" class="volCol">';
+    ordersStr += '<span class="glyphicon glyphicon-trash"></th>';
+    ordersStr += '<th colspan="2" style="width: 10%;">Manage</th>';
+    ordersStr += '</tr>';
+    ordersArr.forEach(function(currVal) {
+      ordersStr += '<tr>';
+      ordersStr += '<td>' + currVal.restr + '</td>';
+      ordersStr += '<td>' + currVal.selection + '</td>';
+      ordersStr += '<td class="dollarsDetail">';
+      ordersStr += currVal.price.toLocaleString('en-US', {
+        style: 'currency',
+        currency: 'USD'
+      });
+      ordersStr += '</td>';
+      if (currVal.pickup === 'on') {
+        ordersStr += '<td class="pickup volCol">Yes</td>';
+      } else {
+        ordersStr += '<td class="volCol">No</td>';
+      }
+      if (currVal.cleanup === 'on') {
+        ordersStr += '<td class="cleanup volCol">Yes</td>';
+      } else {
+        ordersStr += '<td class="volCol">No</td>';
+      }
+      ordersStr += '<td>';
+      ordersStr += '<a title="Edit this order."';
+      ordersStr += ' onclick="getEditOrderPage(' + currVal.rowNum + ')">';
+      ordersStr += 'Edit</a>';
+      ordersStr += '</td>';
+      ordersStr += '<td class="danger">';
+      ordersStr += '<a title="Delete this order."';
+      ordersStr += ' onclick="deleteOrder(' + currVal.rowNum + ', ';
+      ordersStr += currVal.price + ')" class="text-danger">';
+      ordersStr += 'Delete</a>';
+      ordersStr += '</td>';
+      ordersStr += '</tr>';
+    });
+    ordersStr = ordersStr + '</table>';
+  }
+  return ordersStr;
+}
+
+
+/**
+* @param {string} ordersJsonStr
+*/
+function enterOrdersPage(ordersJsonStr) {
+  'use strict';
+  var ordersJson = ordersStr2Json(ordersJsonStr);
+  var headerHtml = '';
+  var bodyHtml = '';
+  var ordersArr = [];
+  ordersJson.orders.forEach(function(currVal) {
+    if (currVal.id === USER_OBJ.id) {
+      ordersArr.push({
+        'restr': currVal.restr,
+        'selection': currVal.selection,
+        'price': currVal.price,
+        'tax': (currVal.price * 0.07),
+        'total': currVal.price + (currVal.price * 0.07),
+        'pickup': currVal.pickup,
+        'cleanup': currVal.cleanup,
+        'rowNum': currVal.rowNum
+      });
+    }
+  });
+  // build header
+  headerHtml += '<div id="takeoutHeader">';
+  headerHtml += '<h2>Takeout Orders&#32;';
+  headerHtml += '<button type="button" class="btn btn-default"';
+  headerHtml += ' onClick="getOrdersPage();setIntervalTimer()">';
+  headerHtml += 'Exit</button></h2>';
+  headerHtml += '<h5><span>Enter, Edit, or Delete Orders for ';
+  headerHtml += USER_OBJ.name.familyName + ',';
+  headerHtml += USER_OBJ.name.givenName;
+  headerHtml += '</span></h5>';
+  headerHtml += '</div>';
+  $('div#takeoutHeader').html(headerHtml);
+  // build body
+  bodyHtml += '<div id="body">';  // start div=body
+  // Start order entry form
+  bodyHtml += '<form id="formEe" class="form-horizontal"';
+  bodyHtml += ' onsubmit="orderEnterSubmit(this)">';
+  bodyHtml += '<div class="form-group">';  // start form-group
+  bodyHtml += '<label class="control-label col-sm-2" for="menuSelected">';
+  bodyHtml += 'Restaurant:</label>';
+  bodyHtml += '<div class="col-sm-10">';  // start col-sm-10
+  bodyHtml += '<select class="form-control" id="menuSelected"';
+  bodyHtml += ' name="restaurant" onchange="menuSelect()">';
+  bodyHtml += '<option value="NA">***SELECT ONE***</option>';
+  bodyHtml += getRestArr();
+  bodyHtml += '</select>';
+  bodyHtml += '<a href="http://www.google.com" id="menuLink" target="_blank"';
+  bodyHtml += ' title="Right click and select Open in New Tab">Menu Link</a>';
+  bodyHtml += '</div>';  // end col-sm-10
+  bodyHtml += '</div>';  // end form-group
+  // selection
+  bodyHtml += '<div class="form-group">';  // start form-group
+  bodyHtml += '<label class="control-label col-sm-2" for="selectionText">';
+  bodyHtml += 'Selection:</label>';
+  bodyHtml += '<div class="col-sm-10">';  // start col-sm-10
+  bodyHtml += '<input type="text" class="form-control" id="selectionText"';
+  bodyHtml += ' name="selection" placeholder="Enter order description">';
+  bodyHtml += '</div>';  // end col-sm-10
+  bodyHtml += '</div>';  // end form-group
+  // price
+  bodyHtml += '<div class="form-group">';  // start form-group
+  bodyHtml += '<label class="control-label col-sm-2" for="price">';
+  bodyHtml += 'Price:</label>';
+  bodyHtml += '<div class="col-sm-10">';  // start col-sm-10
+  bodyHtml += '<input type="text" class="form-control" id="priceEntered"';
+  bodyHtml += ' name="price" placeholder="Enter order price"';
+  bodyHtml += ' pattern="[0-9]+[.][0-9]{2}">';
+  bodyHtml += '</div>';  // end col-sm-10
+  bodyHtml += '</div>';  // end form-group
+  // pickup
+  bodyHtml += '<div class="form-group">';  // start form-group
+  bodyHtml += '<label class="control-label col-sm-2" for="pickupSelect">';
+  bodyHtml += 'I will pick up order:</label>';
+  bodyHtml += '<div class="col-sm-10">';  // start col-sm-10
+  bodyHtml += '<div id="pickupSelect" class="radio">';  // start class=radio
+  bodyHtml += '<label class="radio-inline"><input type="radio"';
+  bodyHtml += ' name="pickup" value="on">Yes</label>';
+  bodyHtml += '<label class="radio-inline"><input type="radio"';
+  bodyHtml += 'name="pickup" value="" checked>No</label>';
+  bodyHtml += '</div>';  // end class=radio
+  bodyHtml += '</div>';  // end col-sm-10
+  bodyHtml += '</div>';  // end form-group
+  // cleanup
+  bodyHtml += '<div class="form-group">';  // start form-group
+  bodyHtml += '<label class="control-label col-sm-2" for="cleanupSelect">';
+  bodyHtml += 'I will clean up:</label>';
+  bodyHtml += '<div class="col-sm-10">';  // start col-sm-10
+  bodyHtml += '<div class="radio">';  // start class=radio
+  bodyHtml += '<label class="radio-inline"><input type="radio"';
+  bodyHtml += ' name="cleanup" value="on">Yes</label>';
+  bodyHtml += '<label class="radio-inline"><input type="radio"';
+  bodyHtml += 'name="cleanup" value="" checked>No</label>';
+  bodyHtml += '</div>';  // end class=radio
+  bodyHtml += '</div>';  // end col-sm-10
+  bodyHtml += '</div>';  // end form-group
+  // submit button
+  bodyHtml += '<div class="form-group">';  // start form-group
+  bodyHtml += '<div class="col-sm-offset-2 col-sm-10">';  // start col-sm-10
+  bodyHtml += '<input type="submit" class="btn btn-default"';
+  bodyHtml += ' value="File Order">';
+  bodyHtml += '</div>';  // end col-sm-10
+  bodyHtml += '</div>';  // end form-group
+  bodyHtml += '<input type="hidden" name="userId" value="';
+  bodyHtml += USER_OBJ.id;
+  bodyHtml += '"></input>';
+  bodyHtml += '<input type="hidden" name="userName" value="';
+  bodyHtml += USER_OBJ.name.familyName + ',' + USER_OBJ.name.givenName;
+  bodyHtml += '"></input>';
+  bodyHtml += '</form>';
+  // end order entry form
+  bodyHtml += edDelOrders(ordersArr);
+  bodyHtml += '<p>My running total is: <span style="color:crimson">';
+  bodyHtml += ordersJson.runningTotal
+      .toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+  bodyHtml += '</span></p>';
+  bodyHtml += '<p><a id="restrLink">Edit Restaurant dictionary</a>';
+  bodyHtml += '</div>';  // end div=body
+  $('div#takeoutBody').html(bodyHtml);
+  //
+  $('#restrLink').click(function() {
+    $('div#takeoutHeader').html(restrDictHdr());
+    $('div#takeoutBody').html(restrDictBdy());
+    $('#restrDictFrm').submit(function(event) {
+      event.preventDefault();
+      handleRestrFrmSubmit(event.currentTarget);
+    });
+  });
+  // prevent default action upon form submit
+  $('#formEe').submit(function(event) {
+    event.preventDefault();
+  });
+}
+
+
+/**
+*/
+function getEnterOrdersPage() {
+  'use strict';
+  clearInterval(TIMER_INT_ID);
+  // Client-side calls to server-side functions are asynchronous
+  google.script.run.withSuccessHandler(enterOrdersPage)
+      .getOrders(USER_OBJ.id);
+}
+
+
+/**
+* @param {Object} formObject
+*/
+function orderEnterSubmit(formObject) {
+  'use strict';
+  // Client-side calls to server-side functions are asynchronous
+  google.script.run.withSuccessHandler(getEnterOrdersPage)
+      .fileOrderToSpreadsheet(formObject);
+}
+
+
+/**
+* @param {number} rowNum
+* @param {number} price
+*/
+function deleteOrder(rowNum, price) {
+  'use strict';
+  var jsonStr = JSON.stringify({'rowNum': rowNum, 'price': price});
+  // Client-side calls to server-side functions are asynchronous
+  google.script.run.withSuccessHandler(getEnterOrdersPage)
+      .deleteOrderFromSpreadsheet(jsonStr);
+}
+
+/** ****************************** Edit Orders ****************************** */
+
+
+/**
+* @param {Object} formObject
+*/
+function orderEditSubmit(formObject) {
+  'use strict';
+  // Client-side calls to server-side functions are asynchronous
+  google.script.run.withSuccessHandler(getEnterOrdersPage)
+      .fileOrderEditToSpreadsheet(formObject);
+}
+
+
+/**
+* @param {string} orderJsonStr
+*/
+function buildOrderEditPage(orderJsonStr) {
+  'use strict';
+  var orderJson = JSON.parse(orderJsonStr);
+  var orderArr = orderJson.order[0];
+  var headerHtml = '';
+  var bodyHtml = '';
+  var restrArr = RESTAURANT_ARRAY.find(function(element) {
+    if (element[0] === orderArr[2]) {
+      return true;
+    }
+  });
+  var restrName = restrArr ? restrArr[0] : '***SELECT ONE***';
+  var restrVal = restrArr ? restrArr[0] : 'NA';
+  var restrUrl = restrArr ? restrArr[1] : 'http://www.google.com';
+  // build header
+  headerHtml += '<div id="takeoutHeader">';
+  headerHtml += '<h2>Takeout Orders&#32;';
+  headerHtml += '<button type="button" class="btn btn-default"';
+  headerHtml += ' onClick="getEnterOrdersPage()">Exit</button></h2>';
+  headerHtml += '<h4><span>Edit Order for ';
+  headerHtml += USER_OBJ.name.familyName + ',';
+  headerHtml += USER_OBJ.name.givenName;
+  headerHtml += '</span></h4>';
+  headerHtml += '</div>';
+  $('div#takeoutHeader').html(headerHtml);
+  // build body
+  bodyHtml += '<div id="body">';  // start id=body
+  // Start order edit form
+  bodyHtml += '<form id="formEe2" class="form-horizontal"';
+  bodyHtml += ' onsubmit="orderEditSubmit(this)">';
+  // menu
+  bodyHtml += '<div class="form-group">';  // start form-group
+  bodyHtml += '<label class="control-label col-sm-2" for="menuSelected">';
+  bodyHtml += 'Restaurant:</label>';
+  bodyHtml += '<div class="col-sm-10">';  // start col-sm-10
+  bodyHtml += '<select class="form-control" id="menuSelected"';
+  bodyHtml += ' name="restaurant" onchange="menuSelect()">';
+  bodyHtml += '<option value="' + restrVal + '">';
+  bodyHtml += restrName + '</option>';
+  bodyHtml += getRestArr();
+  bodyHtml += '</select>';
+  bodyHtml += '<a href="' + restrUrl + '" id="menuLink" target="_blank"';
+  bodyHtml += ' title="Right click and select Open in New Tab">Menu Link</a>';
+  bodyHtml += '</div>';  // end col-sm-10
+  bodyHtml += '</div>';  // end form-group
+  // selection
+  bodyHtml += '<div class="form-group">';  // start form-group
+  bodyHtml += '<label class="control-label col-sm-2" for="selectionText">';
+  bodyHtml += 'Selection:</label>';
+  bodyHtml += '<div class="col-sm-10">';  // start col-sm-10
+  bodyHtml += '<input type="text" class="form-control" id="selectionText"';
+  bodyHtml += ' name="selection" value="' + orderArr[4] + '">';
+  bodyHtml += '</div>';  // end col-sm-10
+  bodyHtml += '</div>';  // end form-group
+  // price
+  bodyHtml += '<div class="form-group">';  // start form-group
+  bodyHtml += '<label class="control-label col-sm-2" for="price">';
+  bodyHtml += 'Price:</label>';
+  bodyHtml += '<div class="col-sm-10">';  // start col-sm-10
+  bodyHtml += '<input type="text" class="form-control" id="priceEntered"';
+  bodyHtml += ' name="price" placeholder="0.00" pattern="[0-9]+[.][0-9]{2}"';
+  bodyHtml += ' value="' + orderArr[5].toFixed(2) + '">';
+  bodyHtml += '</div>';  // end col-sm-10
+  bodyHtml += '</div>';  // end form-group
+  // pick up
+  bodyHtml += '<div class="form-group">';  // start form-group
+  bodyHtml += '<label class="control-label col-sm-2" for="pickupSelect">';
+  bodyHtml += 'I will pick up order:</label>';
+  bodyHtml += '<div class="col-sm-10">';  // start col-sm-10
+  bodyHtml += '<div id="pickupSelect" class="radio">';  // start class=radio
+  if (orderArr[6] === 'on') {
+    bodyHtml += '<label class="radio-inline">';
+    bodyHtml += '<input type="radio" name="pickup" value="on" checked>Yes';
+    bodyHtml += '</label>';
+    bodyHtml += '<label class="radio-inline">';
+    bodyHtml += '<input type="radio" name="pickup" value="">No';
+    bodyHtml += '</label>';
+  } else {
+    bodyHtml += '<label class="radio-inline">';
+    bodyHtml += '<input type="radio" name="pickup" value="on">Yes';
+    bodyHtml += '</label>';
+    bodyHtml += '<label class="radio-inline">';
+    bodyHtml += '<input type="radio" name="pickup" value="" checked>No';
+    bodyHtml += '</label>';
+  }
+  bodyHtml += '</div>';  // end class=radio
+  bodyHtml += '</div>';  // end col-sm-10
+  bodyHtml += '</div>';  // end form-group
+  // clean up
+  bodyHtml += '<div class="form-group">';  // start form-group
+  bodyHtml += '<label class="control-label col-sm-2" for="cleanupSelect">';
+  bodyHtml += 'I will clean up:</label>';
+  bodyHtml += '<div class="col-sm-10">';  // start col-sm-10
+  bodyHtml += '<div class="radio">';  // start class=radio
+  if (orderArr[7] === 'on') {
+    bodyHtml += '<label class="radio-inline">';
+    bodyHtml += '<input type="radio" name="cleanup" value="on" checked>Yes';
+    bodyHtml += '</label>';
+    bodyHtml += '<label class="radio-inline">';
+    bodyHtml += '<input type="radio" name="cleanup" value="">No';
+    bodyHtml += '</label>';
+  } else {
+    bodyHtml += '<label class="radio-inline">';
+    bodyHtml += '<input type="radio" name="cleanup" value="on">Yes';
+    bodyHtml += '</label>';
+    bodyHtml += '<label class="radio-inline">';
+    bodyHtml += '<input type="radio" name="cleanup" value="" checked>No';
+    bodyHtml += '</label>';
+  }
+  bodyHtml += '</div>';  // end class=radio
+  bodyHtml += '</div>';  // end col-sm-10
+  bodyHtml += '</div>';  // end form-group
+  // submit button
+  bodyHtml += '<div class="form-group">';  // start form-group
+  bodyHtml += '<div class="col-sm-offset-2 col-sm-10">';  // start col-sm-10
+  bodyHtml += '<input type="submit" class="btn btn-default"';
+  bodyHtml += ' value="File Edit">';
+  bodyHtml += '</div>';  // end col-sm-10
+  bodyHtml += '</div>';  // end form-group
+  bodyHtml += '<input type="hidden" name="rowNum" value="' + orderArr[9] + '">';
+  bodyHtml += '<input type="hidden" name="userId" value="' + USER_OBJ.id;
+  bodyHtml += '">';
+  bodyHtml += '<input type="hidden" name="userName" value="';
+  bodyHtml += USER_OBJ.name.familyName + ',' + USER_OBJ.name.givenName;
+  bodyHtml += '">';
+  bodyHtml += '<input type="hidden" name="oldPrice" value="';
+  bodyHtml += orderArr[5] + '">';
+  bodyHtml += '</form>';
+  // end order edit form
+  bodyHtml += '</div>';  // end id=body
+  $('div#takeoutBody').html(bodyHtml);
+  // prevent default action upon form submit
+  $('#formEe2').submit(function(event) {
+    event.preventDefault();
+  });
+}
+
+
+/**
+* @param {number} row
+*/
+function getEditOrderPage(row) {
+  'use strict';
+  // Client-side calls to server-side functions are asynchronous
+  google.script.run.withSuccessHandler(buildOrderEditPage).getOneOrder(row);
+}
+
+</script>

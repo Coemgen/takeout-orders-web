@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<base target="_top">
+<!-- Latest compiled and minified CSS -->
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+<?!= include('Stylesheet'); ?>
+<script>
+var USER_OBJ = <?!= userObj ?>;
+</script>
+</head>
+<body>
+ <div class="container">
+  <div id="takeoutHeader"></div>
+  <div id="takeoutBody"></div>
+  <div id="takeoutFooter"></div>
+ </div>
+</body>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+<?!= include('JavaScript') ?>
+<?!= include('JsSortable') ?>
+</html>
